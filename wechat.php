@@ -1,43 +1,91 @@
 <?php
-header('content-type:text/html;charset=utf-8');
- 
-define("TOKEN", "mywechattoken"); //define your token
-$wx = new wechatCallbackapiTest();
- 
-if($_GET['echostr']){
-    $wx->valid(); //如果发来了echostr则进行验证
-}else{
-    $wx->responseMsg(); //如果没有echostr，则返回消息
+define("TOKEN", "mytoken");
+
+// 1 判断请求方法，get请求一般为消息验证,post为其他消息交互
+// 2 验证signature是否正确(消息来自微信服务器)
+$handler = new WeixinHandler();
+$reqMethod = strtolower($_SERVER["REQUEST_METHOD"]);
+if ("get" == $reqMethod && !empty($_GET["echostr"])) {
+    if ($handler->isValid()) {
+        $echostr = $_GET["echostr"];
+        echo $echostr;
+        exit();
+    }
+} else {
+    //判断消息类型，返回"你发送的是xxx消息"
+    $handler->responseMessage();
 }
- 
- 
-class wechatCallbackapiTest{
- 
-    public function valid(){ //valid signature , option
- 
-        $echoStr = $_GET["echostr"];
-        if($this->checkSignature()){ //调用验证字段
-        echo $echoStr;
-        exit;
+
+class WeixinHandler
+{
+
+    function checkSignature()
+    {
+        $timestamp = $_GET["timestamp"];
+        $nonce = $_GET["nonce"];
+
+        $tmpArr = array(
+            TOKEN,
+            $timestamp,
+            $nonce
+        );
+        sort($tmpArr, SORT_STRING);
+        $tmpStr = implode($tmpArr);
+        $tmpStr = sha1($tmpStr);
+
+        if ($tmpStr) {
+            return $tmpStr;
+        } else {
+            return "";
         }
-    }   
- 
-    public function responseMsg(){
-   
-    //get post data, May be due to the different environments
-    $postStr = $GLOBALS["HTTP_RAW_POST_DATA"]; //接收微信发来的XML数据
- 
-    //extract post data
-    if(!empty($postStr)){
-        
-        //解析post来的XML为一个对象$postObj
-        $postObj = simplexml_load_string($postStr, 'SimpleXMLElement', LIBXML_NOCDATA);
-    
-        $fromUsername = $postObj->FromUserName; //请求消息的用户
-        $toUsername = $postObj->ToUserName; //"我"的公众号id
-        $keyword = trim($postObj->Content); //消息内容
-        $time = time(); //时间戳
-        $msgtype = 'text'; //消息类型：文本
+    }
+
+    function isValid()
+    {
+        $signature = $_GET["signature"];
+        if ($signature == $this->checkSignature()) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    function responseMessage(){
+        $defaultMsgType="text";
+        //从请求数据获取FromUserName和ToUserName以及消息类型
+        $postStr = isset($GLOBALS['HTTP_RAW_POST_DATA']) ? $GLOBALS['HTTP_RAW_POST_DATA'] : file_get_contents("php://input");
+        if(!empty($postStr)){
+            $postObj = simplexml_load_string($postStr, 'SimpleXMLElement', LIBXML_NOCDATA);
+            //发送方账号（openId）
+            $fromUsername = $postObj->FromUserName;
+            //开发者微信号
+            $toUsername = $postObj->ToUserName;
+            //消息类型
+            $MsgType = strtolower($postObj->MsgType);
+            //消息内容
+            $keyword = trim($postObj->Content);
+            $typeResult="";
+            $resultStr="";
+            if("text"==$MsgType){
+                $typeResult="你发送的是文本消息";
+            }else if("image"==$MsgType){
+                $typeResult="你发送的是图片消息";
+            }else if("voice"==$MsgType){
+                $typeResult="你发送的是语音消息";
+            }else if("video"==$MsgType){
+                $typeResult="你发送的是视频消息";
+            }else if("location"==$MsgType){
+                $typeResult="你发送的是地理位置消息";
+            }else if("link"==$MsgType){
+                $typeResult="你发送的是链接消息";
+            }else if("event"==$MsgType){
+                //事件推送处理
+                $typeResult="事件推送消息";
+            }else{
+                $typeResult="你发送的是其他类型的消息";
+            }
+            if("text"==$defaultMsgType){
+                $time = time(); //时间戳
         $textTpl = "<xml>
 <ToUserName><![CDATA[%s]]></ToUserName>
 <FromUserName><![CDATA[%s]]></FromUserName>
@@ -45,53 +93,13 @@ class wechatCallbackapiTest{
 <MsgType><![CDATA[%s]]></MsgType>
 <Content><![CDATA[%s]]></Content>
 </xml>";
-    
-        //用户订阅后自动返回信息
-        if($postObj->MsgType == 'event'){ //如果XML信息里消息类型为event
-            if($postObj->Event == 'subscribe'){ //如果是订阅事件
-                $contentStr = "欢迎订阅互动叙事！\n更多精彩内容：http://www.ichatgame.com";
-                $resultStr = sprintf($textTpl, $fromUsername, $toUsername, $time, $msgtype, $contentStr);
-                echo $resultStr;
-                exit();
+$resultStr=sprintf($textTpl, $fromUsername, $toUsername, $time, $defaultMsgType, $typeResult);
             }
-        } 
-
-        if($keyword == 'Hello'){
-            $contentStr = 'Hello, your name please?';
-            $resultStr = sprintf($textTpl, $fromUsername, $toUsername, $time, $msgtype, $contentStr);
             echo $resultStr;
-            exit();            
         }else{
-            $contentStr = '输入Hello看一下';
-            $resultStr = sprintf($textTpl, $fromUsername, $toUsername, $time, $msgtype, $contentStr);
-            echo $resultStr;
-            exit();
-        }
-    
-    }else {
-        echo "";
-        exit;
-        }
-    }
-  
-    //验证字段
-    private function checkSignature(){
-    
-        $signature = $_GET["signature"];
-        $timestamp = $_GET["timestamp"];
-        $nonce = $_GET["nonce"]; 
-            
-        $token = TOKEN;
-        $tmpArr = array($token, $timestamp, $nonce);
-        sort($tmpArr);
-        $tmpStr = implode( $tmpArr );
-        $tmpStr = sha1( $tmpStr );
-        
-        if( $tmpStr == $signature ){
-            return true;
-        }else{
-            return false;
+            echo "";
+            exit;
         }
     }
 }
-?>
+?> 
